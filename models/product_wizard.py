@@ -119,19 +119,12 @@ class YagProductWizard(models.TransientModel):
 
     def action_crear(self):
         self.ensure_one()
-        faltan = self.line_ids.filtered(lambda l: l.obligatorio and not l.value_ids)
-        if faltan:
-            raise UserError(_(
-                "These attributes are required for this family and are empty: %s.\n\n"
-                "They are what identifies the piece on the tag."
-            ) % ", ".join(faltan.mapped("attribute_id.name")))
+        # Required attributes and "at least one value loaded" used to block saving here
+        # (raise UserError). Business decision 2026-09-11: loading must never be blocked
+        # by missing attribute data -- receiving staff often don't have every spec on hand
+        # yet. An empty cell on the tag is acceptable and expected; it gets filled in later
+        # from the product form. Both blocking checks were removed for that reason.
         cargadas = self.line_ids.filtered("value_ids")
-        # A family with no setup yet loads with no attributes and that is fine: thirteen
-        # of the fourteen branches are still unconfigured, and refusing them would block
-        # loading almost the whole catalogue. The tag prints empty, which is honest and
-        # exactly what it does today.
-        if self.line_ids and not cargadas:
-            raise UserError(_("No attribute carries a value: the tag would print empty."))
 
         tmpl = self.env["product.template"].create({
             "name": self.name.strip(),
