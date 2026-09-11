@@ -155,6 +155,14 @@ class YagProductWizard(models.TransientModel):
                     "res_model": "purchase.order",
                     "res_id": self.purchase_order_id.id,
                     "view_mode": "form", "target": "current"}
+        # The single-variant case (the common one) closes clean: opening another list
+        # action here raced with the caller's own onClose hook (guided_create.js reloads
+        # the product list it was opened from) and threw "Component is destroyed" in the
+        # browser -- the dialog was left open, and a second "Create product" click on that
+        # same stuck dialog is what produced duplicate products (found 2026-09-11).
+        if len(variantes) == 1:
+            return {"type": "ir.actions.act_window_close"}
+
         # Several versions came out and we do not guess which one was bought: the list
         # opens so the codes go in and the buyer picks the ones that belong on the order.
         # More than one version means one code each, and they are filled in a list rather

@@ -19,6 +19,21 @@ import { useService } from "@web/core/utils/hooks";
 
 const WIZARD = "yaguven_darakjian_etiquetas.action_yag_product_wizard";
 
+// Guards against "Component is destroyed": the wizard can close after this controller's
+// own component was already torn down by another action landing at the same time (found
+// 2026-09-11 -- an UncaughtPromiseError left the wizard dialog stuck open, and a second
+// click on "Create product" on that same dialog created a duplicate product).
+function safeReload(model) {
+    try {
+        const result = model.load();
+        if (result && typeof result.catch === "function") {
+            result.catch(() => {});
+        }
+    } catch (_e) {
+        // component already gone -- nothing to reload
+    }
+}
+
 class GuidedListController extends ListController {
     setup() {
         super.setup();
@@ -26,7 +41,7 @@ class GuidedListController extends ListController {
     }
     async createRecord() {
         return this.actionService.doAction(WIZARD, {
-            onClose: () => this.model.load(),
+            onClose: () => safeReload(this.model),
         });
     }
 }
@@ -38,7 +53,7 @@ class GuidedKanbanController extends KanbanController {
     }
     async createRecord() {
         return this.actionService.doAction(WIZARD, {
-            onClose: () => this.model.load(),
+            onClose: () => safeReload(this.model),
         });
     }
 }
