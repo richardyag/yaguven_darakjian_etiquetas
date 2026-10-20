@@ -19,4 +19,31 @@
             </xpath>
         </field>
     </record>
+
+    <!-- Right where the serial and the GIA certificate get typed in as the goods come
+         in (see the module docstring): the weight belongs to this same screen, not to
+         a separate inventory report nobody opens while receiving. -->
+    <record id="stock_lot_form_view_weight" model="ir.ui.view">
+        <field name="name">stock.lot.form.weight.grams</field>
+        <field name="model">stock.lot</field>
+        <field name="inherit_id" ref="stock.view_production_lot_form"/>
+        <field name="arch" type="xml">
+            <xpath expr="//field[@name='ref']" position="after">
+                <field name="weight_grams"/>
+            </xpath>
+        </field>
+    </record>
+
+    <!-- Same column on the list the product's "Lot/Serial Numbers" button opens, so the
+         weight is visible without opening each piece one by one. -->
+    <record id="stock_lot_list_view_weight" model="ir.ui.view">
+        <field name="name">stock.lot.list.weight.grams</field>
+        <field name="model">stock.lot</field>
+        <field name="inherit_id" ref="stock.view_production_lot_tree"/>
+        <field name="arch" type="xml">
+            <xpath expr="//field[@name='ref']" position="after">
+                <field name="weight_grams" optional="show"/>
+            </xpath>
+        </field>
+    </record>
 </odoo>

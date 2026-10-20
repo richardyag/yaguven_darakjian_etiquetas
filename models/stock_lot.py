@@ -20,12 +20,24 @@ and where the record of the print is kept -- on the piece, which is what was pri
 The method names are the variant's on purpose: the button widget reads the model off the
 record it sits on, so the same button works on both screens with no branch in the browser.
 """
-from odoo import _, models
+from odoo import _, fields, models
 from odoo.exceptions import UserError
 
 
 class StockLot(models.Model):
     _inherit = "stock.lot"
+
+    # The piece's real weight, in grams -- NOT a product attribute. A chain model sells
+    # at a different weight piece to piece (it is precious metal, not a manufactured
+    # tolerance), so a per-model attribute would mean a new value, and for serialised
+    # metal a new variant, for every gram the scale happens to read. The piece is what
+    # carries one weight, which is why this lives next to the serial, the same place the
+    # GIA certificate goes (see the module docstring above).
+    weight_grams = fields.Float(
+        "Weight (g)", digits=(16, 2),
+        help="Actual weight of THIS piece, in grams. Varies piece to piece even for the "
+             "same model -- that is why it lives on the serial number, not on a product "
+             "attribute.")
 
     def get_jewelry_label_zpl(self):
         self.ensure_one()
