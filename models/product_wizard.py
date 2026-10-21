@@ -110,12 +110,60 @@ class YagProductWizard(models.TransientModel):
             "slot": linea.cell_id.name or "",
             "admite_varios": linea.admite_varios,
             "obligatorio": linea.obligatorio,
-        }) for linea in config.sorted("sequence")]
+            "condicion_attribute_id": linea.condicion_attribute_id.id,
+            "condicion_value_id": linea.condicion_value_id.id,
+        }) for linea in config.sorted("sequence") if not linea.condicion_attribute_id]
         if not config:
             self.aviso = _("This category has no tag setup yet, so there is nothing to "
                            "ask for. Set it up on the category first.")
         else:
             self.aviso = False
+        # Las lineas condicionadas (las que dependen de otro atributo) no entran todavia:
+        # las agrega _onchange_line_values en cuanto la respuesta de la que dependen llega.
+
+    @api.onchange("line_ids")
+    def _onchange_line_values(self):
+        """Add or drop conditional lines as the answers that gate them change.
+
+        Rebuilding the whole set on every keystroke would lose whatever the person
+        already typed on a line that stays visible, so this keeps what is there for
+        every attribute that still applies and only adds or removes what changed.
+
+        Re-reads the category's setup on every call instead of caching it on `self`:
+        onchange calls are not guaranteed to be the same Python object from one call to
+        the next, so a plain instance attribute set here would not survive to the next
+        keystroke. The read is cheap -- one category's worth of lines, already in cache
+        from the ORM after the first call.
+        """
+        if not self.categ_id or not self.line_ids:
+            return
+        _origen, config = self.categ_id._yag_tag_config()
+        contestado = {l.attribute_id: l.value_ids for l in self.line_ids}
+
+        def aplica(linea):
+            if not linea.condicion_attribute_id:
+                return True
+            dado = contestado.get(linea.condicion_attribute_id)
+            return bool(dado and linea.condicion_value_id in dado)
+
+        deberian_estar = {l.attribute_id for l in config if aplica(l)}
+        estan = set(contestado.keys())
+        if deberian_estar == estan:
+            return  # nada cambio, no tocar lo que la persona esta tipeando
+
+        conservadas_vals = {attr: vals for attr, vals in contestado.items()
+                            if attr in deberian_estar}
+        nuevas = [(0, 0, {
+            "attribute_id": linea.attribute_id.id,
+            "sequence": linea.sequence,
+            "slot": linea.cell_id.name or "",
+            "admite_varios": linea.admite_varios,
+            "obligatorio": linea.obligatorio,
+            "condicion_attribute_id": linea.condicion_attribute_id.id,
+            "condicion_value_id": linea.condicion_value_id.id,
+            "value_ids": [(6, 0, conservadas_vals.get(linea.attribute_id, self.env["product.attribute.value"]).ids)],
+        }) for linea in config.sorted("sequence") if linea.attribute_id in deberian_estar]
+        self.line_ids = [(5, 0, 0)] + nuevas
 
     @api.onchange("name", "categ_id")
     def _onchange_name(self):
@@ -210,6 +258,11 @@ class YagProductWizardLine(models.TransientModel):
     admite_varios = fields.Boolean("Several values allowed")
     obligatorio = fields.Boolean("Required")
     slot = fields.Char("Tag cell")
+    # Carried over from `yag.tag.line` purely so `_onchange_line_values` on the wizard
+    # can tell, without a second trip to the category config, whether THIS line is the
+    # one that gates some other line. Not shown on the form.
+    condicion_attribute_id = fields.Many2one("product.attribute")
+    condicion_value_id = fields.Many2one("product.attribute.value")
 
     @api.constrains("value_ids", "admite_varios")
     def _check_varios(self):

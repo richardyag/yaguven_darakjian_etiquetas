@@ -25,7 +25,7 @@ loading: `Material` appears on 15,692 templates in the old system and opens vari
 sometimes offers a choice. So this model says WHAT IS PRINTED; how many values a given
 product loads into a line stays with that product.
 """
-from odoo import api, fields, models
+from odoo import _, api, fields, models
 from odoo.exceptions import ValidationError
 
 class YagTagCell(models.Model):
@@ -94,6 +94,39 @@ class YagTagLine(models.Model):
         help="Counts towards the family's completeness figure and warns when it is empty.")
     create_variant = fields.Selection(
         related="attribute_id.create_variant", readonly=True)
+
+    # Gating: this line is only asked when another line of the SAME category already
+    # carries a specific value. "Does this piece have a center stone?" -> No means the
+    # five Center Stone lines never show up for this product at all, instead of printing
+    # blank cells someone has to notice are wrong. Left empty, the line always applies --
+    # today's behaviour, unchanged.
+    condicion_attribute_id = fields.Many2one(
+        "product.attribute", "Only ask when",
+        help="Leave empty to always ask this attribute. Set it to make this line "
+             "conditional on another attribute of the same category already carrying "
+             "the value chosen below -- it must already be configured on this category, "
+             "or saving refuses it.")
+    condicion_value_id = fields.Many2one(
+        "product.attribute.value", "...equals",
+        domain="[('attribute_id', '=', condicion_attribute_id)]")
+
+    @api.constrains("condicion_attribute_id", "category_id")
+    def _check_condicion_en_misma_categoria(self):
+        for line in self:
+            if not line.condicion_attribute_id:
+                continue
+            if line.condicion_attribute_id == line.attribute_id:
+                raise ValidationError(_(
+                    "'%s' cannot depend on itself.") % line.attribute_id.name)
+            hermana = self.env["yag.tag.line"].search([
+                ("category_id", "=", line.category_id.id),
+                ("attribute_id", "=", line.condicion_attribute_id.id),
+            ], limit=1)
+            if not hermana:
+                raise ValidationError(_(
+                    "'%s' is set to depend on '%s', but that attribute is not "
+                    "configured on this category yet -- add it first."
+                ) % (line.attribute_id.name, line.condicion_attribute_id.name))
 
     # Odoo 19 declares SQL constraints as class attributes. `_sql_constraints` is NOT
     # honoured any more and fails SILENTLY: verified on 2026-08-31 against the live
