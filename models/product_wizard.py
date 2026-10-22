@@ -121,6 +121,16 @@ class YagProductWizard(models.TransientModel):
         # Las lineas condicionadas (las que dependen de otro atributo) no entran todavia:
         # las agrega _onchange_line_values en cuanto la respuesta de la que dependen llega.
 
+    def yag_debug_recompute(self):
+        """TEMP, not private on purpose: lets the recompute be called and inspected over
+        RPC directly, instead of through the onchange protocol, to tell apart a wiring
+        problem (the trigger not firing) from a logic problem (the trigger fires but
+        computes the wrong thing). Remove once the real onchange is confirmed working
+        through the UI -- see the 2026-10-22 debugging note below."""
+        self.ensure_one()
+        self._recompute_condicionales()
+        return {l.attribute_id.id: l.attribute_id.name for l in self.line_ids}
+
     @api.onchange("line_ids")
     def _recompute_condicionales(self):
         """Add or drop conditional lines as the answers that gate them change.
