@@ -122,7 +122,7 @@ class YagProductWizard(models.TransientModel):
         # las agrega _onchange_line_values en cuanto la respuesta de la que dependen llega.
 
     @api.onchange("line_ids")
-    def _onchange_line_values(self):
+    def _recompute_condicionales(self):
         """Add or drop conditional lines as the answers that gate them change.
 
         Rebuilding the whole set on every keystroke would lose whatever the person
@@ -134,6 +134,14 @@ class YagProductWizard(models.TransientModel):
         the next, so a plain instance attribute set here would not survive to the next
         keystroke. The read is cheap -- one category's worth of lines, already in cache
         from the ORM after the first call.
+
+        Watching `line_ids` on the wizard ALONE turned out not to fire from editing a
+        cell inside an existing row -- checked live on 2026-10-21: choosing "Mined" then
+        "Lab Grown" on Diamond Origin never brought Diamond Shape in. `line_ids` as a
+        trigger reliably catches rows being added or removed; a value changing INSIDE a
+        row is caught by `YagProductWizardLine._onchange_value_ids` below, which calls
+        back into this same method -- kept here, not duplicated, because this is the one
+        place that has the whole line set to compare against the category's setup.
         """
         if not self.categ_id or not self.line_ids:
             return
@@ -263,6 +271,16 @@ class YagProductWizardLine(models.TransientModel):
     # one that gates some other line. Not shown on the form.
     condicion_attribute_id = fields.Many2one("product.attribute")
     condicion_value_id = fields.Many2one("product.attribute.value")
+
+    @api.onchange("value_ids")
+    def _onchange_value_ids(self):
+        """The real trigger: the web client is guaranteed to fire this when the cell the
+        person is looking at changes, where `line_ids` on the parent was not (see the
+        note on `YagProductWizard._recompute_condicionales`). All the logic stays on the
+        wizard, which is the one that can see every line at once -- this just rings the
+        bell."""
+        if self.wizard_id:
+            self.wizard_id._recompute_condicionales()
 
     @api.constrains("value_ids", "admite_varios")
     def _check_varios(self):
