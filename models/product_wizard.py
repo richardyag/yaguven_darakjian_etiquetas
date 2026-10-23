@@ -121,37 +121,29 @@ class YagProductWizard(models.TransientModel):
         # Las lineas condicionadas (las que dependen de otro atributo) no entran todavia:
         # las agrega _onchange_line_values en cuanto la respuesta de la que dependen llega.
 
-    def yag_debug_recompute(self):
-        """TEMP, not private on purpose: lets the recompute be called and inspected over
-        RPC directly, instead of through the onchange protocol, to tell apart a wiring
-        problem (the trigger not firing) from a logic problem (the trigger fires but
-        computes the wrong thing). Remove once the real onchange is confirmed working
-        through the UI -- see the 2026-10-22 debugging note below."""
+    def action_recalcular_atributos(self):
+        """Button next to the list, not an automatic onchange.
+
+        Tried twice to make this live as the person types -- onchange('line_ids') on the
+        wizard (2026-10-21), then onchange('value_ids') on the line calling back into the
+        wizard (2026-10-22). Confirmed over RPC both times that the computation itself is
+        right: called directly, Diamond Shape comes in exactly when Diamond Origin is set
+        to Lab Grown. What does not survive the trip is the CLIENT applying an onchange
+        result that adds new rows to the very list being edited inline -- the same class
+        of Owl rendering bug `tag_config_views.xml` already worked around by moving row
+        edits into a dialog instead of inline (see its comment on that). A button is not
+        magic, but a click is a plain server round-trip with nothing to reconcile live,
+        which is the one thing confirmed not to break here.
+        """
         self.ensure_one()
         self._recompute_condicionales()
-        return {l.attribute_id.id: l.attribute_id.name for l in self.line_ids}
 
-    @api.onchange("line_ids")
     def _recompute_condicionales(self):
         """Add or drop conditional lines as the answers that gate them change.
 
-        Rebuilding the whole set on every keystroke would lose whatever the person
-        already typed on a line that stays visible, so this keeps what is there for
-        every attribute that still applies and only adds or removes what changed.
-
-        Re-reads the category's setup on every call instead of caching it on `self`:
-        onchange calls are not guaranteed to be the same Python object from one call to
-        the next, so a plain instance attribute set here would not survive to the next
-        keystroke. The read is cheap -- one category's worth of lines, already in cache
-        from the ORM after the first call.
-
-        Watching `line_ids` on the wizard ALONE turned out not to fire from editing a
-        cell inside an existing row -- checked live on 2026-10-21: choosing "Mined" then
-        "Lab Grown" on Diamond Origin never brought Diamond Shape in. `line_ids` as a
-        trigger reliably catches rows being added or removed; a value changing INSIDE a
-        row is caught by `YagProductWizardLine._onchange_value_ids` below, which calls
-        back into this same method -- kept here, not duplicated, because this is the one
-        place that has the whole line set to compare against the category's setup.
+        Rebuilding the whole set from scratch would lose whatever the person already
+        typed on a line that stays visible, so this keeps what is there for every
+        attribute that still applies and only adds or removes what changed.
         """
         if not self.categ_id or not self.line_ids:
             return
@@ -276,21 +268,11 @@ class YagProductWizardLine(models.TransientModel):
     admite_varios = fields.Boolean("Several values allowed")
     obligatorio = fields.Boolean("Required")
     slot = fields.Char("Tag cell")
-    # Carried over from `yag.tag.line` purely so `_onchange_line_values` on the wizard
-    # can tell, without a second trip to the category config, whether THIS line is the
-    # one that gates some other line. Not shown on the form.
+    # Carried over from `yag.tag.line` purely so `_recompute_condicionales` on the
+    # wizard can tell, without a second trip to the category config, whether THIS line
+    # is the one that gates some other line. Not shown on the form.
     condicion_attribute_id = fields.Many2one("product.attribute")
     condicion_value_id = fields.Many2one("product.attribute.value")
-
-    @api.onchange("value_ids")
-    def _onchange_value_ids(self):
-        """The real trigger: the web client is guaranteed to fire this when the cell the
-        person is looking at changes, where `line_ids` on the parent was not (see the
-        note on `YagProductWizard._recompute_condicionales`). All the logic stays on the
-        wizard, which is the one that can see every line at once -- this just rings the
-        bell."""
-        if self.wizard_id:
-            self.wizard_id._recompute_condicionales()
 
     @api.constrains("value_ids", "admite_varios")
     def _check_varios(self):

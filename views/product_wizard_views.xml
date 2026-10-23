@@ -39,6 +39,11 @@
             <field name="tracking" invisible="type != 'consu' or not is_storable"/>
           </group>
         </group>
+        <div class="d-flex justify-content-end mb-2" invisible="not categ_id">
+          <button name="action_recalcular_atributos" type="object"
+                  string="Recalculate attributes" class="btn-secondary" icon="fa-refresh"
+                  help="Click after answering a question like 'Has center stone?' so the attributes that depend on it show up or drop out."/>
+        </div>
         <field name="line_ids" nolabel="1">
           <list editable="bottom" create="false" delete="false"
                 decoration-warning="obligatorio and not value_ids">
