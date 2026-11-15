@@ -207,6 +207,22 @@ class YagProductWizard(models.TransientModel):
         # takes the requirement away from every piece of that family, not just this one.
         cargadas = self.line_ids.filtered("value_ids")
 
+        # Varying two attributes at once in the same save would ask Odoo for their full
+        # cross product (every color times every size), and nothing here knows which of
+        # those crossed combinations are pieces that actually exist. One piece in hand
+        # has at most one attribute that takes several values this time (the other
+        # colours/sizes of THIS same version, loaded together); everything else about it
+        # is fixed. See `_yag_materializar_variantes` for why this line matters even more
+        # since attributes went to "Dynamically".
+        variadas = cargadas.filtered(lambda l: len(l.value_ids) > 1)
+        if len(variadas) > 1:
+            raise UserError(_(
+                "Elegiste varios valores en más de un atributo a la vez (%s). Eso crearía "
+                "combinaciones cruzadas que pueden no ser piezas reales. Cargá la pieza "
+                "variando un solo atributo por vez (las demás versiones, después, por "
+                "separado)."
+            ) % ", ".join(variadas.mapped("attribute_id.name")))
+
         tmpl = self.env["product.template"].create({
             "name": self.name.strip(),
             "categ_id": self.categ_id.id,
@@ -221,7 +237,7 @@ class YagProductWizard(models.TransientModel):
                 "value_ids": [(6, 0, l.value_ids.ids)],
             }) for l in cargadas],
         })
-        variantes = tmpl.product_variant_ids
+        variantes = tmpl._yag_materializar_variantes(variadas.attribute_id)
         if len(variantes) == 1 and self.default_code:
             variantes.default_code = self.default_code
 
@@ -285,6 +301,51 @@ class YagProductWizardLine(models.TransientModel):
                     "'%s' takes a single value on this family. Loading several would "
                     "create one version of the product per value."
                 ) % line.attribute_id.name)
+
+
+class ProductTemplate(models.Model):
+    _inherit = "product.template"
+
+    def _yag_materializar_variantes(self, atributo_variable=None):
+        """Create the product.product for exactly the combination(s) just loaded on the
+        wizard -- never Odoo's automatic generation.
+
+        Needed since the 23 attributes went from "Instantly" to "Dynamically" on
+        2026-11-15: that stopped the phantom combinations (good), but it also means
+        Odoo no longer creates ANY variant on save -- not even the one piece just
+        entered -- until that exact combination reaches a sale order line. A piece
+        that cannot be bought before it is sold is not a workable flow, so the
+        variant(s) the wizard asked for are created here, directly, regardless of
+        what each attribute's create_variant mode is.
+
+        For attributes still on "Instantly", Odoo already created the variant eagerly
+        by the time this runs; `_create_product_variant` finds it and returns it
+        rather than duplicating it, so this is safe to call either way.
+
+        `atributo_variable` is the one `product.attribute` (if any) carrying several
+        values on this save -- `action_crear` already refused more than one, so this
+        never crosses two attributes against each other.
+        """
+        self.ensure_one()
+        lineas = self.attribute_line_ids.filtered(
+            lambda l: l.attribute_id.create_variant != "no_variant")
+        if not lineas:
+            return self.product_variant_ids
+
+        fijas = lineas.filtered(
+            lambda l: l.attribute_id != atributo_variable
+        ).product_template_value_ids
+        variable = lineas.filtered(
+            lambda l: l.attribute_id == atributo_variable
+        ).product_template_value_ids
+
+        if not variable:
+            return self._create_product_variant(fijas)
+
+        variantes = self.env["product.product"]
+        for ptav in variable:
+            variantes |= self._create_product_variant(fijas | ptav)
+        return variantes
 
 
 class PurchaseOrder(models.Model):
