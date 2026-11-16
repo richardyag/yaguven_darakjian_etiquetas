@@ -207,6 +207,23 @@ class YagProductWizard(models.TransientModel):
         # takes the requirement away from every piece of that family, not just this one.
         cargadas = self.line_ids.filtered("value_ids")
 
+        # Varying two attributes at once in the same save asks Odoo for their full cross
+        # product (every colour times every size) -- and nothing here knows which of
+        # those crossed combinations are pieces that actually exist. Measured on the
+        # catalogue 2026-11-15: 403 models carry combinations nobody ever loaded, and in
+        # all but 4 of them the cause was exactly this -- two attributes varying at once
+        # when only one of them was supposed to. One piece in hand has at most one
+        # attribute that takes several values this time (the other colours of THIS same
+        # version, loaded together); everything else about it is fixed.
+        variadas = cargadas.filtered(lambda l: len(l.value_ids) > 1)
+        if len(variadas) > 1:
+            raise UserError(_(
+                "Elegiste varios valores en más de un atributo a la vez (%s). Eso crearía "
+                "combinaciones cruzadas que pueden no ser piezas reales. Cargá la pieza "
+                "variando un solo atributo por vez (las demás versiones, después, por "
+                "separado)."
+            ) % ", ".join(variadas.mapped("attribute_id.name")))
+
         tmpl = self.env["product.template"].create({
             "name": self.name.strip(),
             "categ_id": self.categ_id.id,
