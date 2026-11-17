@@ -399,7 +399,7 @@ class ProductTemplate(models.Model):
             ptav_fijas |= linea.product_template_value_ids.filtered(
                 lambda v: v.product_attribute_value_id in valores)
 
-        if atributo_variable is None:
+        if not atributo_variable:
             return self._create_product_variant(ptav_fijas)
 
         valores_variable = valores_por_atributo[atributo_variable]
