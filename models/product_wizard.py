@@ -300,7 +300,14 @@ class YagProductWizard(models.TransientModel):
             {l.attribute_id: l.value_ids for l in cargadas},
             variadas.attribute_id,
         )
-        if len(variantes) == 1 and self.default_code:
+        # When the model only had one dimension (say Material) and this round is the
+        # first time a second one (say Length) gets a value, there is still only one
+        # possible combination -- Odoo extends the SAME existing variant in place rather
+        # than creating a second one (confirmed 2026-11-17 against a stocked test piece:
+        # the id, the stock and the code all survived). Overwriting that variant's code
+        # with whatever was typed this round would erase a real SKU already on a real
+        # piece; only a variant that had none yet gets one.
+        if len(variantes) == 1 and self.default_code and not variantes.default_code:
             variantes.default_code = self.default_code
 
         if self.purchase_order_id and len(variantes) == 1:
