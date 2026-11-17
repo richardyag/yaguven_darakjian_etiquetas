@@ -65,7 +65,13 @@
         </field>
         <footer>
           <button name="action_crear" type="object" string="Create product"
-                  class="btn-primary"/>
+                  class="btn-primary" invisible="modelo_existente_id"/>
+          <button name="action_agregar_a_existente" type="object"
+                  string="Add as a new version of the existing model"
+                  class="btn-primary" invisible="not modelo_existente_id"
+                  confirm="This adds the value(s) above to the EXISTING model shown above, as new version(s) of it -- it will not create a second model."/>
+          <button name="action_crear" type="object" string="Create a second model anyway"
+                  class="btn-secondary" invisible="not modelo_existente_id"/>
           <button string="Cancel" class="btn-secondary" special="cancel"/>
         </footer>
       </form>

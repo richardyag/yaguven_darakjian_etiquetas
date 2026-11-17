@@ -198,23 +198,18 @@ class YagProductWizard(models.TransientModel):
                 "second model."
             ) % tmpl.product_variant_count
 
-    def action_crear(self):
-        self.ensure_one()
-        # Nothing here refuses the save any more. An empty cell is announced by
-        # `aviso_vacias` while the form is open and the piece is in the person's hand;
-        # what it must never do is leave them with no way out but to go and untick
-        # "Required" on the category, which is what happened in QA on 2026-09-11 and
-        # takes the requirement away from every piece of that family, not just this one.
-        cargadas = self.line_ids.filtered("value_ids")
+    def _yag_validar_una_variable(self, cargadas):
+        """Varying two attributes at once in the same save asks Odoo for their full cross
+        product (every colour times every size) -- and nothing here knows which of
+        those crossed combinations are pieces that actually exist. Measured on the
+        catalogue 2026-11-15: 403 models carry combinations nobody ever loaded, and in
+        all but 4 of them the cause was exactly this -- two attributes varying at once
+        when only one of them was supposed to. One piece in hand has at most one
+        attribute that takes several values this time (the other colours of THIS same
+        version, loaded together); everything else about it is fixed.
 
-        # Varying two attributes at once in the same save asks Odoo for their full cross
-        # product (every colour times every size) -- and nothing here knows which of
-        # those crossed combinations are pieces that actually exist. Measured on the
-        # catalogue 2026-11-15: 403 models carry combinations nobody ever loaded, and in
-        # all but 4 of them the cause was exactly this -- two attributes varying at once
-        # when only one of them was supposed to. One piece in hand has at most one
-        # attribute that takes several values this time (the other colours of THIS same
-        # version, loaded together); everything else about it is fixed.
+        Returns the (at most one) wizard line that is carrying several values.
+        """
         variadas = cargadas.filtered(lambda l: len(l.value_ids) > 1)
         if len(variadas) > 1:
             raise UserError(_(
@@ -223,6 +218,17 @@ class YagProductWizard(models.TransientModel):
                 "variando un solo atributo por vez (las demás versiones, después, por "
                 "separado)."
             ) % ", ".join(variadas.mapped("attribute_id.name")))
+        return variadas
+
+    def action_crear(self):
+        self.ensure_one()
+        # Nothing here refuses the save any more. An empty cell is announced by
+        # `aviso_vacias` while the form is open and the piece is in the person's hand;
+        # what it must never do is leave them with no way out but to go and untick
+        # "Required" on the category, which is what happened in QA on 2026-09-11 and
+        # takes the requirement away from every piece of that family, not just this one.
+        cargadas = self.line_ids.filtered("value_ids")
+        variadas = self._yag_validar_una_variable(cargadas)
 
         tmpl = self.env["product.template"].create({
             "name": self.name.strip(),
@@ -266,6 +272,57 @@ class YagProductWizard(models.TransientModel):
             "context": {"create": False},
         }
 
+    def action_agregar_a_existente(self):
+        """For the model `_onchange_name` already found (`modelo_existente_id`): add
+        the value(s) just typed as new version(s) of THAT model instead of a second one.
+
+        This is the purchase-side half of the Instantly/Dynamically split discussed
+        with Gabriel 2026-11-16: it lets a new combination be chosen and bought before
+        it is ever sold, for a model that already exists, the same way `action_crear`
+        already does for a model that does not exist yet -- without needing any
+        attribute's create_variant mode to change, and without the wizard's name-match
+        ever merging two models on its own (the person still has to click this
+        button on purpose).
+        """
+        self.ensure_one()
+        if not self.modelo_existente_id:
+            raise UserError(_(
+                "No hay un modelo existente detectado con ese nombre y categoría. Usá "
+                "\"Create product\" para cargar un modelo nuevo."
+            ))
+        cargadas = self.line_ids.filtered("value_ids")
+        if not cargadas:
+            raise UserError(_("Elegí al menos un valor de atributo para agregar."))
+        variadas = self._yag_validar_una_variable(cargadas)
+
+        tmpl = self.modelo_existente_id
+        variantes = tmpl._yag_agregar_variante_existente(
+            {l.attribute_id: l.value_ids for l in cargadas},
+            variadas.attribute_id,
+        )
+        if len(variantes) == 1 and self.default_code:
+            variantes.default_code = self.default_code
+
+        if self.purchase_order_id and len(variantes) == 1:
+            self.env["purchase.order.line"].create({
+                "order_id": self.purchase_order_id.id,
+                "product_id": variantes.id,
+                "product_qty": 1,
+                "price_unit": self.standard_price,
+            })
+            return {"type": "ir.actions.act_window",
+                    "res_model": "purchase.order",
+                    "res_id": self.purchase_order_id.id,
+                    "view_mode": "form", "target": "current"}
+        return {
+            "type": "ir.actions.act_window",
+            "name": _("Codes for each new version of %s") % tmpl.name,
+            "res_model": "product.product",
+            "view_mode": "list,form",
+            "domain": [("id", "in", variantes.ids)],
+            "context": {"create": False},
+        }
+
 
 class YagProductWizardLine(models.TransientModel):
     _name = "yag.product.wizard.line"
@@ -302,6 +359,68 @@ class YagProductWizardLine(models.TransientModel):
                     "'%s' takes a single value on this family. Loading several would "
                     "create one version of the product per value."
                 ) % line.attribute_id.name)
+
+
+class ProductTemplate(models.Model):
+    _inherit = "product.template"
+
+    def _yag_agregar_variante_existente(self, valores_por_atributo, atributo_variable=None):
+        """Add the value(s) the wizard just asked for to THIS existing model and create
+        the product.product for exactly that/those combination(s) -- never the cross
+        product with whatever other versions this model already had.
+
+        `valores_por_atributo` is a dict {product.attribute: product.attribute.value
+        recordset} with exactly what was typed this round, one entry per attribute the
+        category asks for. `atributo_variable` is the one attribute (if any) carrying
+        several values this round -- `action_agregar_a_existente` already refused more
+        than one, so the combination below never crosses two attributes against each
+        other, even though the model as a whole may already have several real versions
+        on several attributes.
+
+        Existing values on this model are never removed, only added to -- a value this
+        round does not touch is left exactly as it was.
+        """
+        self.ensure_one()
+        ptav_fijas = self.env["product.template.attribute.value"]
+        for attr, valores in valores_por_atributo.items():
+            if attr == atributo_variable:
+                continue
+            linea = self.attribute_line_ids.filtered(lambda l: l.attribute_id == attr)
+            if not linea:
+                linea = self.env["product.template.attribute.line"].create({
+                    "product_tmpl_id": self.id,
+                    "attribute_id": attr.id,
+                    "value_ids": [(6, 0, valores.ids)],
+                })
+            else:
+                faltantes = valores - linea.value_ids
+                if faltantes:
+                    linea.value_ids = [(4, v.id) for v in faltantes]
+            ptav_fijas |= linea.product_template_value_ids.filtered(
+                lambda v: v.product_attribute_value_id in valores)
+
+        if atributo_variable is None:
+            return self._create_product_variant(ptav_fijas)
+
+        valores_variable = valores_por_atributo[atributo_variable]
+        linea_variable = self.attribute_line_ids.filtered(
+            lambda l: l.attribute_id == atributo_variable)
+        if not linea_variable:
+            linea_variable = self.env["product.template.attribute.line"].create({
+                "product_tmpl_id": self.id,
+                "attribute_id": atributo_variable.id,
+                "value_ids": [(6, 0, valores_variable.ids)],
+            })
+        else:
+            faltantes = valores_variable - linea_variable.value_ids
+            if faltantes:
+                linea_variable.value_ids = [(4, v.id) for v in faltantes]
+
+        variantes = self.env["product.product"]
+        for ptav in linea_variable.product_template_value_ids.filtered(
+                lambda v: v.product_attribute_value_id in valores_variable):
+            variantes |= self._create_product_variant(ptav_fijas | ptav)
+        return variantes
 
 
 class PurchaseOrder(models.Model):
