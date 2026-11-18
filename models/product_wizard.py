@@ -49,8 +49,15 @@ class YagProductWizard(models.TransientModel):
     # Surfaced, never acted on by itself: whether this looks like a model already loaded.
     # Manual loading should SHOW the collision and let the person decide -- merging two
     # models silently is how a catalogue ends up wrong in a way nobody can trace.
-    modelo_existente_id = fields.Many2one(
-        "product.template", "Existing model", readonly=True)
+    #
+    # NOT readonly=True here on purpose -- same trap as the line fields below: from 17 on
+    # the web client leaves a field the MODEL declares readonly out of the payload it
+    # sends, so action_agregar_a_existente would read it back empty on save and refuse
+    # every click with "No hay un modelo existente detectado" even right after the
+    # onchange had shown it on screen (found 2026-11-18, Gabriel's RFQ exercise). The view
+    # marks it `readonly="1" force_save="1"` instead, which locks it from the person and
+    # still sends it.
+    modelo_existente_id = fields.Many2one("product.template", "Existing model")
     # When it is opened from a purchase, the piece goes straight onto the order: the
     # moment the buyer has the supplier's information in front of them is the moment the
     # data is right, and asking them to come back later is asking for the empty cells this

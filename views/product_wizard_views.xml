@@ -13,7 +13,7 @@
         </div>
         <div class="alert alert-warning" role="alert" invisible="not aviso">
           <field name="aviso" readonly="1" nolabel="1"/>
-          <field name="modelo_existente_id" readonly="1"
+          <field name="modelo_existente_id" readonly="1" force_save="1"
                  invisible="not modelo_existente_id"/>
         </div>
         <!-- The empty cells are said here, next to the form, and not thrown as an error
