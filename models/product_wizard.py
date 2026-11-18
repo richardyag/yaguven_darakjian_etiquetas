@@ -245,8 +245,18 @@ class YagProductWizard(models.TransientModel):
             }) for l in cargadas],
         })
         variantes = tmpl.product_variant_ids
-        if len(variantes) == 1 and self.default_code:
+        if not variantes:
+            # An attribute on Dynamically or No variants means Odoo generated nothing
+            # on save (found testing loose diamonds 2026-11-17: Diamond Polish and
+            # Diamond Symmetry are Dynamically in test). Materialize it the same
+            # explicit way "Add as a new version" already does, so this never comes
+            # back empty with no line added to the purchase.
+            variantes = tmpl._yag_agregar_variante_existente(
+                {l.attribute_id: l.value_ids for l in cargadas}, variadas.attribute_id)
+        if len(variantes) == 1 and self.default_code and not variantes.default_code:
             variantes.default_code = self.default_code
+        if len(variantes) == 1 and self.standard_price and not variantes.standard_price:
+            variantes.standard_price = self.standard_price
 
         if self.purchase_order_id and len(variantes) == 1:
             self.env["purchase.order.line"].create({
@@ -309,6 +319,13 @@ class YagProductWizard(models.TransientModel):
         # piece; only a variant that had none yet gets one.
         if len(variantes) == 1 and self.default_code and not variantes.default_code:
             variantes.default_code = self.default_code
+        # `_create_product_variant` does not copy the template's cost onto the piece
+        # it materializes (confirmed 2026-11-17: stayed at 0 until a FIFO receipt
+        # corrected it, and never corrected at all under Standard costing). Only a
+        # piece that has none yet gets the typed cost, for the same reason the code
+        # above only fills an empty default_code.
+        if len(variantes) == 1 and self.standard_price and not variantes.standard_price:
+            variantes.standard_price = self.standard_price
 
         if self.purchase_order_id and len(variantes) == 1:
             self.env["purchase.order.line"].create({
