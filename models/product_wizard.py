@@ -410,8 +410,25 @@ class ProductTemplate(models.Model):
 
         Existing values on this model are never removed, only added to -- a value this
         round does not touch is left exactly as it was.
+
+        Found 2026-11-18 (Ricardo's purchase order PO05201, test): writing a new value
+        onto a line whose attribute is still on Instantly does not just add that one
+        value -- it fires Odoo's OWN automatic generation, which crosses it against
+        EVERY other line this model has ever accumulated a second value on, not just
+        the combination this round asked for. A model exercised through several rounds
+        of "Add as a new version" (Ring Size, then Primary Color, then eight Materials,
+        then Accent Stone Shape) came out with 2x2x8x2 = 64 variants, and the explicit
+        materialization below could no longer tell which of those 64 was "the one just
+        asked for" -- _create_product_variant matches by combination, and several
+        looked alike from the caller's side. Anything Odoo generated on its own this
+        call that was not explicitly asked for gets archived at the end, the same way
+        2.1's cleanup of 1,189 pre-existing phantoms did -- never a variant that
+        already carries a code or stock, matching the native guard on
+        ProductTemplateAttributeLine below.
         """
         self.ensure_one()
+        antes = set(self.with_context(active_test=False).product_variant_ids.ids)
+
         ptav_fijas = self.env["product.template.attribute.value"]
         for attr, valores in valores_por_atributo.items():
             if attr == atributo_variable:
@@ -431,26 +448,36 @@ class ProductTemplate(models.Model):
                 lambda v: v.product_attribute_value_id in valores)
 
         if not atributo_variable:
-            return self._create_product_variant(ptav_fijas)
-
-        valores_variable = valores_por_atributo[atributo_variable]
-        linea_variable = self.attribute_line_ids.filtered(
-            lambda l: l.attribute_id == atributo_variable)
-        if not linea_variable:
-            linea_variable = self.env["product.template.attribute.line"].create({
-                "product_tmpl_id": self.id,
-                "attribute_id": atributo_variable.id,
-                "value_ids": [(6, 0, valores_variable.ids)],
-            })
+            variantes = self._create_product_variant(ptav_fijas)
         else:
-            faltantes = valores_variable - linea_variable.value_ids
-            if faltantes:
-                linea_variable.value_ids = [(4, v.id) for v in faltantes]
+            valores_variable = valores_por_atributo[atributo_variable]
+            linea_variable = self.attribute_line_ids.filtered(
+                lambda l: l.attribute_id == atributo_variable)
+            if not linea_variable:
+                linea_variable = self.env["product.template.attribute.line"].create({
+                    "product_tmpl_id": self.id,
+                    "attribute_id": atributo_variable.id,
+                    "value_ids": [(6, 0, valores_variable.ids)],
+                })
+            else:
+                faltantes = valores_variable - linea_variable.value_ids
+                if faltantes:
+                    linea_variable.value_ids = [(4, v.id) for v in faltantes]
 
-        variantes = self.env["product.product"]
-        for ptav in linea_variable.product_template_value_ids.filtered(
-                lambda v: v.product_attribute_value_id in valores_variable):
-            variantes |= self._create_product_variant(ptav_fijas | ptav)
+            variantes = self.env["product.product"]
+            for ptav in linea_variable.product_template_value_ids.filtered(
+                    lambda v: v.product_attribute_value_id in valores_variable):
+                variantes |= self._create_product_variant(ptav_fijas | ptav)
+
+        despues = set(self.with_context(active_test=False).product_variant_ids.ids)
+        fantasma_ids = despues - antes - set(variantes.ids)
+        if fantasma_ids:
+            fantasmas = self.env["product.product"].with_context(
+                active_test=False).browse(list(fantasma_ids))
+            seguras = fantasmas.filtered(lambda p: not p.default_code and not p.qty_available)
+            if seguras:
+                seguras.write({"active": False})
+
         return variantes
 
 
