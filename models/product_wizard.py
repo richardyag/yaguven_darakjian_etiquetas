@@ -62,7 +62,25 @@ class YagProductWizard(models.TransientModel):
     # moment the buyer has the supplier's information in front of them is the moment the
     # data is right, and asking them to come back later is asking for the empty cells this
     # whole thing exists to prevent.
-    purchase_order_id = fields.Many2one("purchase.order", readonly=True)
+    #
+    # Not readonly=True either, for the same reason as modelo_existente_id above -- and
+    # on top of that, `_yag_purchase_order()` below also falls back to reading the
+    # context the button call itself carried, because this field going quietly empty on
+    # the SECOND "Add as a new version" of a session (while the exact same button worked
+    # moments earlier for the first piece) could not be reproduced through RPC no matter
+    # how closely the real two-click sequence was replicated 2026-11-18 -- so the method
+    # no longer trusts a single source for this.
+    purchase_order_id = fields.Many2one("purchase.order")
+
+    def _yag_purchase_order(self):
+        """The purchase order this wizard was opened from, read from the stored field
+        or, failing that, from the context the button call carried -- see the note on
+        `purchase_order_id` above for why there are two."""
+        self.ensure_one()
+        if self.purchase_order_id:
+            return self.purchase_order_id
+        po_id = self.env.context.get("default_purchase_order_id")
+        return self.env["purchase.order"].browse(po_id) if po_id else self.env["purchase.order"]
     aviso = fields.Char("Notice", readonly=True)
     # What the tag will print empty, said WHILE there is still time to type it.
     # This used to be a UserError on the way out. That was the wrong place for it: the
@@ -265,16 +283,17 @@ class YagProductWizard(models.TransientModel):
         if len(variantes) == 1 and self.standard_price and not variantes.standard_price:
             variantes.standard_price = self.standard_price
 
-        if self.purchase_order_id and len(variantes) == 1:
+        orden_compra = self._yag_purchase_order()
+        if orden_compra and len(variantes) == 1:
             self.env["purchase.order.line"].create({
-                "order_id": self.purchase_order_id.id,
+                "order_id": orden_compra.id,
                 "product_id": variantes.id,
                 "product_qty": 1,
                 "price_unit": self.standard_price,
             })
             return {"type": "ir.actions.act_window",
                     "res_model": "purchase.order",
-                    "res_id": self.purchase_order_id.id,
+                    "res_id": orden_compra.id,
                     "view_mode": "form", "target": "current"}
         # Several versions came out and we do not guess which one was bought: the list
         # opens so the codes go in and the buyer picks the ones that belong on the order.
@@ -334,16 +353,17 @@ class YagProductWizard(models.TransientModel):
         if len(variantes) == 1 and self.standard_price and not variantes.standard_price:
             variantes.standard_price = self.standard_price
 
-        if self.purchase_order_id and len(variantes) == 1:
+        orden_compra = self._yag_purchase_order()
+        if orden_compra and len(variantes) == 1:
             self.env["purchase.order.line"].create({
-                "order_id": self.purchase_order_id.id,
+                "order_id": orden_compra.id,
                 "product_id": variantes.id,
                 "product_qty": 1,
                 "price_unit": self.standard_price,
             })
             return {"type": "ir.actions.act_window",
                     "res_model": "purchase.order",
-                    "res_id": self.purchase_order_id.id,
+                    "res_id": orden_compra.id,
                     "view_mode": "form", "target": "current"}
         return {
             "type": "ir.actions.act_window",
