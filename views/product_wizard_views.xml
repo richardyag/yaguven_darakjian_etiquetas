@@ -43,7 +43,7 @@
                  carry on, which is the very thing this wizard exists to prevent. A
                  misspelt value gets corrected later; an empty cell is noticed by nobody
                  until someone prints the tag. -->
-            <field name="value_ids" widget="many2many_tags"
+            <field name="value_ids" widget="many2many_tags" width="350px"
                    options="{'no_quick_create': True}"
                    context="{'default_attribute_id': attribute_id}"
                    domain="[('attribute_id', '=', attribute_id)]"/>
